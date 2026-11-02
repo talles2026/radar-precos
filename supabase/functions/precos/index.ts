@@ -27,7 +27,12 @@ async function avisar(dono: string, payload: J) {
   if (!s) return false;
   await vapid();
   try {
-    await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload), { TTL: 3600, urgency: "high" });
+    const envia = () => webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload), { TTL: 6 * 3600, urgency: "high" });
+    try { await envia(); } catch (e: any) {
+      // falha passageira do serviço de push: tenta mais uma vez
+      if (e?.statusCode === 404 || e?.statusCode === 410 || (e?.statusCode && e.statusCode < 500 && e.statusCode !== 429)) throw e;
+      await new Promise((r) => setTimeout(r, 1500)); await envia();
+    }
     return true;
   } catch (e: any) {
     if (e?.statusCode === 404 || e?.statusCode === 410) await db.from("precos_inscricoes").delete().eq("dono", dono);
@@ -45,23 +50,37 @@ function resumoHist(h: J[]) {
   return { dias: porDia(h), min: vs.length ? Math.min(...vs) : null, max: vs.length ? Math.max(...vs) : null, pontos: vs.length };
 }
 
+// Aviso no celular SEMPRE que o menor preço do produto baixar (≥ 1% e ≥ R$ 1 em relação à leitura anterior),
+// e quando chegar no alvo. Não repete o mesmo preço dentro de 24 h (vai e volta de anúncio não vira spam).
 async function alertar(p: J, res: J, h: J[]) {
   const m = res.melhor; if (!m) return;
-  const antes = h.slice(0, -1).map((x) => +x.menor).filter((v) => v > 0);
-  const minAntes = antes.length ? Math.min(...antes) : null;
-  const recente = p.alerta_em && Date.now() - Date.parse(p.alerta_em) < 20 * 3600e3;
-  let titulo = "", corpo = "";
-  if (p.alvo && m.preco <= +p.alvo) {
-    if (recente && p.alerta_preco && m.preco >= +p.alerta_preco * 0.99) return;
-    titulo = `🔔 ${p.termo}: ${brl(m.preco)}`;
-    corpo = `Chegou no seu alvo (${brl(+p.alvo)}) na ${m.lojaNome}. Toque para abrir a oferta.`;
-  } else if (!p.alvo && minAntes && antes.length >= 6 && m.preco < minAntes * 0.97) {
-    if (recente && p.alerta_preco && m.preco >= +p.alerta_preco * 0.99) return;
+  const leituras = h.map((x) => +x.menor).filter((v) => v > 0);   // a última é a leitura de agora
+  const atual = +m.preco;
+  const anterior = leituras.length >= 2 ? leituras[leituras.length - 2] : null;
+  const antes = leituras.slice(0, -1), minAntes = antes.length ? Math.min(...antes) : null;
+  const recente = p.alerta_em && Date.now() - Date.parse(p.alerta_em) < 24 * 3600e3;
+  if (recente && p.alerta_preco && Math.abs(atual - +p.alerta_preco) <= +p.alerta_preco * 0.01) return;
+  const noAlvo = p.alvo && atual <= +p.alvo;
+  const caiu = anterior != null && atual <= anterior * 0.99 && anterior - atual >= 1;
+  if (!noAlvo && !caiu) return;
+  const pct = anterior ? ((1 - atual / anterior) * 100).toFixed(1).replace(".", ",") : "";
+  const recorde = minAntes != null && atual < minAntes * 0.995;
+  const loja = m.lojaNome || "loja";
+  let titulo: string, corpo: string;
+  if (noAlvo) {
+    titulo = `🎯 ${p.termo}: ${brl(atual)}`;
+    corpo = `Chegou no seu alvo (${brl(+p.alvo)}) na ${loja}.${caiu ? ` Baixou ${pct}% desde a última busca.` : ""}`;
+  } else if (recorde) {
     titulo = `📉 Menor preço já visto: ${p.termo}`;
-    corpo = `${brl(m.preco)} na ${m.lojaNome} (antes o menor era ${brl(minAntes)}).`;
-  } else return;
+    corpo = `${brl(atual)} na ${loja}. Baixou ${pct}% (antes ${brl(anterior!)}; o menor era ${brl(minAntes!)}).`;
+  } else {
+    titulo = `⬇️ ${p.termo} baixou para ${brl(atual)}`;
+    corpo = `Antes ${brl(anterior!)} (−${pct}%) · ${loja}.${minAntes ? ` Menor já visto: ${brl(minAntes)}.` : ""}`;
+  }
+  if (m.suspeito) corpo += " ⚠️ Bem abaixo dos outros anúncios: confira o vendedor antes de pagar.";
+  corpo += " Toque para abrir.";
   const ok = await avisar(p.dono, { title: titulo, body: corpo, tag: `preco-${p.id}`, url: `${SITE}?p=${p.id}` });
-  if (ok) await db.from("precos_produtos").update({ alerta_preco: m.preco, alerta_em: new Date().toISOString() }).eq("id", p.id);
+  if (ok) await db.from("precos_produtos").update({ alerta_preco: atual, alerta_em: new Date().toISOString() }).eq("id", p.id);
 }
 
 async function atualizar(p: J) {

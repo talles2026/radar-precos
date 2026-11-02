@@ -93,6 +93,40 @@ form.busca input:focus{outline:none;border-color:var(--accent)}
 .toast.on{opacity:1}
 .skel{height:110px;border-radius:14px;background:linear-gradient(90deg,var(--panel),var(--soft),var(--panel));background-size:200% 100%;animation:sk 1.2s infinite}
 @keyframes sk{to{background-position:-200% 0}}
+/* produtos ativos: faixa logo abaixo da busca */
+.ativos{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 6px;margin:0 -2px;scroll-snap-type:x proximity;scrollbar-width:none}
+.ativos::-webkit-scrollbar{display:none}
+.at{all:unset;box-sizing:border-box;scroll-snap-align:start;flex:none;width:150px;background:var(--panel);border:1.5px solid var(--line);border-radius:14px;padding:10px 12px;display:grid;gap:2px;cursor:pointer}
+.at:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.at.sel{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
+.at .n{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.at .v{font:700 16px var(--f-num);color:var(--accent)}
+.at .x{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.at.vazio{width:auto;color:var(--muted);font-size:13px;border-style:dashed;cursor:default}
+.secao{display:grid;gap:10px}
+.secao-t{display:flex;align-items:baseline;gap:8px}
+.secao-t .msg{margin-left:auto}
+/* lista de preços por loja (uma linha por loja, do menor para o maior) */
+.precos{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.precos li{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 12px;border-top:1px solid var(--line);align-items:center}
+.precos li:first-child{border-top:0}
+.precos li.best{background:var(--accent-soft)}
+.precos .lj-n{font-weight:700;font-size:14px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.precos .lj-v{font:700 16px var(--f-num);text-align:right}
+.precos .lj-v.nada{font:500 12.5px var(--f-body);color:var(--muted)}
+.precos .lj-s{grid-column:1/-1;font-size:12px;color:var(--muted);overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.precos .lj-a{grid-column:1/-1;display:flex;gap:14px;font-size:13px;font-weight:700}
+.precos .lj-a a{text-decoration:none}
+.precos .lj-a a.sec{font-weight:600;color:var(--muted)}
+.cab{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:start}
+.cab h2{overflow-wrap:anywhere}
+.fechar{all:unset;cursor:pointer;color:var(--muted);font-size:13px;font-weight:600;padding:2px 4px}
+details.bloco{border-top:1px solid var(--line);padding-top:10px}
+details.bloco summary{cursor:pointer;font-weight:700;font-size:14px;list-style:none;display:flex;justify-content:space-between}
+details.bloco summary::after{content:"▾";color:var(--muted)}
+details.bloco[open] summary::after{content:"▴"}
+details.bloco>div{margin-top:10px;display:grid;gap:10px}
+.outros{display:grid;gap:18px;margin-top:6px}
 footer{font-size:12px;color:var(--muted);text-align:center;display:grid;gap:6px}
 footer button{all:unset;color:var(--accent);cursor:pointer;font-weight:600}
 </style>
@@ -113,13 +147,14 @@ footer button{all:unset;color:var(--accent);cursor:pointer;font-weight:600}
   </form>
   <p class="dica">Eu identifico o tipo sozinho. Veículos: OLX, Mercado Livre, Facebook e Google. Demais: Mercado Livre, Shopee, Amazon, AliExpress e Google.</p>
 
-  <section id="resultado" hidden></section>
-
-  <section style="display:grid;gap:10px">
-    <div class="linha"><h2>Meus produtos</h2><span class="msg" id="qtd"></span></div>
-    <div class="lista" id="lista"><div class="skel"></div></div>
+  <section class="secao" aria-label="Produtos ativos">
+    <div class="secao-t"><span class="eyebrow">Produtos ativos</span><span class="msg" id="qtd"></span></div>
+    <div class="ativos" id="ativos"><div class="skel" style="height:72px;width:100%"></div></div>
   </section>
 
+  <section id="painel"></section>
+
+  <div class="outros">
   <section class="card" id="cardAlertas">
     <h2>Alertas no celular</h2>
     <div id="alertasCorpo"></div>
@@ -131,6 +166,7 @@ footer button{all:unset;color:var(--accent);cursor:pointer;font-weight:600}
     <div class="linha"><button class="btn" type="button" id="btnInstall">📲 Instalar no celular</button></div>
     <div class="prev" id="installHint" hidden></div>
   </section>
+  </div>
 
   <footer>
     <span>Preços lidos nas lojas e em comparadores (Bing Shopping e Buscapé). Confira na loja antes de pagar.</span>
@@ -141,7 +177,7 @@ footer button{all:unset;color:var(--accent);cursor:pointer;font-weight:600}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
-const VERSAO = "3";
+const VERSAO = "4";
 const FN = "https://xgwdrrxbqopsfhjgkvdq.supabase.co/functions/v1/precos";
 const $ = id => document.getElementById(id);
 const store = { get(k, d) { try { const v = localStorage.getItem("rp:" + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -175,55 +211,50 @@ async function api(corpo, ms = 100000) {
   return j;
 }
 
-// ---------- cartões das lojas obrigatórias
-function cartoesLojas(r) {
+// ---------- preços por loja: todas as lojas obrigatórias, do menor para o maior
+function listaLojas(r) {
   const melhor = r.melhor;
-  return `<div class="lojas">${(r.lojas || []).map(l => {
+  const lojas = [...(r.lojas || [])].sort((a, b) => (a.melhor ? a.melhor.preco : Infinity) - (b.melhor ? b.melhor.preco : Infinity));
+  return `<ul class="precos">${lojas.map(l => {
     const m = l.melhor, best = melhor && m && m.link === melhor.link;
-    return `<div class="lj ${best ? "best" : ""}"><b>${esc(l.nome)}${best ? " · menor" : ""}</b>
-      ${m ? `<span class="v">${brl(m.preco)}</span>${m.suspeito ? `<span class="chip wa" style="justify-self:start">muito abaixo da média: confira bem</span>` : ""}<span class="s">${esc(m.titulo)}${m.via ? ` · via ${esc(m.via)}` : ""}</span><a href="${esc(m.link)}" target="_blank" rel="noopener">Abrir oferta →</a>`
-          : `<span class="v nada">Sem preço lido</span><span class="s">${esc(l.motivo || "")}</span>`}
-      <a href="${esc(l.link)}" target="_blank" rel="noopener" style="font-weight:600">${m ? "Ver mais na loja" : "Ver na loja, do menor preço →"}</a></div>`;
-  }).join("")}</div>
+    return `<li class="${best ? "best" : ""}">
+      <span class="lj-n">${esc(l.nome)}${best ? `<span class="chip ac">menor</span>` : ""}${m?.suspeito ? `<span class="chip wa">confira</span>` : ""}</span>
+      ${m ? `<span class="lj-v">${brl(m.preco)}</span><span class="lj-s">${esc(m.titulo)}${m.via ? ` · via ${esc(m.via)}` : ""}</span>
+        <span class="lj-a"><a href="${esc(m.link)}" target="_blank" rel="noopener">Abrir oferta →</a><a class="sec" href="${esc(l.link)}" target="_blank" rel="noopener">mais na loja</a></span>`
+        : `<span class="lj-v nada">sem preço lido</span>${l.motivo ? `<span class="lj-s">${esc(l.motivo)}</span>` : ""}
+        <span class="lj-a"><a href="${esc(l.link)}" target="_blank" rel="noopener">Ver na loja, do menor preço →</a></span>`}
+    </li>`;
+  }).join("")}</ul>
   ${r.outras?.length ? `<p class="msg" style="margin:0">Fora das lojas da lista: ${r.outras.map(o => `<a href="${esc(o.link)}" target="_blank" rel="noopener">${esc(o.vendedor || "loja")} ${brl(o.preco)}</a>`).join(" · ")}</p>` : ""}`;
 }
-function destaque(r, rotulo) {
+function destaque(r) {
   const m = r.melhor;
-  if (!m) return `<div><span class="eyebrow">${rotulo}</span><p style="margin:6px 0 0"><b>Não achei preço igual ao buscado nas lojas que deixam ler.</b> Use os atalhos abaixo; cada um já abre a busca ordenada pelo menor preço.</p></div>`;
-  return `<div style="display:grid;gap:6px"><span class="eyebrow">${rotulo}</span><div class="big">${brl(m.preco)}</div>
-    <div>${esc(m.lojaNome || "")} · <span class="msg">${esc(m.titulo)}</span></div>
+  if (!m) return `<p style="margin:0"><b>Não achei preço igual ao buscado nas lojas que deixam ler.</b> <span class="msg">Use os atalhos abaixo; cada um já abre a busca ordenada pelo menor preço.</span></p>`;
+  return `<div style="display:grid;gap:4px"><span class="eyebrow">Menor preço agora</span><div class="big">${brl(m.preco)}</div>
+    <div class="msg">${esc(m.lojaNome || "")}</div>
     ${m.suspeito ? `<div class="chip wa" style="justify-self:start">Bem abaixo dos outros anúncios: confira estado, vendedor e se não é golpe</div>` : ""}
-    <div><a class="btn" href="${esc(m.link)}" target="_blank" rel="noopener">Abrir oferta · ${esc(m.lojaNome || "loja")}</a></div></div>`;
+    <div style="margin-top:4px"><a class="btn" href="${esc(m.link)}" target="_blank" rel="noopener">Abrir oferta · ${esc(m.lojaNome || "loja")}</a></div></div>`;
 }
 
+// ---------- estado da tela: produto selecionado ou resultado de uma busca nova
+let produtos = store.get("cache", null)?.produtos || [], ultimaAtualizacao = store.get("cache", null)?.agora || null;
+let aberto = new URLSearchParams(location.search).get("p") || store.get("aberto", null);
+let busca = null;   // { q, carregando, r, erro }
+function selecionar(id) { aberto = id; busca = null; store.set("aberto", id); render(); $("painel").scrollIntoView({ block: "start", behavior: "smooth" }); }
+
 // ---------- busca
-let ultimaBusca = null;
 $("formBusca").onsubmit = async e => {
   e.preventDefault();
   const q = $("q").value.trim(); if (q.length < 2) return $("q").focus();
-  const el = $("resultado"); el.hidden = false;
-  el.innerHTML = `<div class="card"><span class="msg">Procurando “${esc(q)}” nas lojas… leva uns 10 segundos.</span><div class="skel"></div></div>`;
-  $("btnBuscar").disabled = true;
-  try {
-    const r = await api({ acao: "buscar", q }, 60000); ultimaBusca = r;
-    const ja = produtos.find(p => p.termo.toLowerCase() === q.toLowerCase());
-    el.innerHTML = `<div class="card">
-      <div class="linha"><span class="chip ac">${esc(r.tipo.nome)}</span><span class="msg">${r.relevantes} ofertas iguais ao buscado · ${hora(r.quando)}</span></div>
-      ${destaque(r, "Menor preço agora")}
-      ${cartoesLojas(r)}
-      ${ja ? `<p class="msg" style="margin:0">Este produto já está na sua lista.</p>` : `<div class="alvo"><label class="msg" for="novoAlvo">Me avise quando chegar a</label><input id="novoAlvo" inputmode="decimal" placeholder="${r.melhor ? brl(Math.floor(r.melhor.preco * 0.9)).replace("R$", "").trim() : "R$"}"><button class="btn" id="btnAcomp" type="button">Acompanhar</button></div>`}
-    </div>`;
-    if (!ja) $("btnAcomp").onclick = async () => {
-      const b = $("btnAcomp"); b.disabled = true; b.textContent = "Salvando…";
-      try { await api({ acao: "adicionar", q, alvo: parse($("novoAlvo").value), resultado: r }); toast("Adicionado. Atualizo a cada 30 min."); el.hidden = true; $("q").value = ""; await carregar(false); if (!(await inscrito())) toast("Ligue os alertas no celular para ser avisado."); }
-      catch (err) { b.disabled = false; b.textContent = "Acompanhar"; toast(err.message); }
-    };
-  } catch (err) { el.innerHTML = `<div class="card"><span class="msg">Não consegui buscar agora (${esc(err.message)}). Tente de novo.</span></div>`; }
-  $("btnBuscar").disabled = false;
+  const ja = produtos.find(p => p.termo.toLowerCase() === q.toLowerCase());
+  if (ja) { $("q").value = ""; toast("Este produto já está ativo."); return selecionar(ja.id); }
+  busca = { q, carregando: true }; render(); $("btnBuscar").disabled = true;
+  try { const r = await api({ acao: "buscar", q }, 60000); if (busca?.q === q) busca = { q, r }; }
+  catch (err) { if (busca?.q === q) busca = { q, erro: err.message }; }
+  $("btnBuscar").disabled = false; render();
 };
 
-// ---------- meus produtos
-let produtos = store.get("cache", null)?.produtos || [], aberto = new URLSearchParams(location.search).get("p") || store.get("aberto", null), ultimaAtualizacao = store.get("cache", null)?.agora || null;
+// ---------- gráfico, previsão, variação
 function grafico(h) {
   const pts = (h?.dias || []).slice(-60);
   if (pts.length < 2) return `<p class="msg" style="margin:0">O gráfico aparece a partir do segundo dia de acompanhamento${pts.length ? ` (hoje: ${brl(pts[0].v)})` : ""}.</p>`;
@@ -240,48 +271,88 @@ function grafico(h) {
 }
 function blocoPrevisao(p) {
   const v = p.previsao || {};
-  return `<div class="prev"><b>Previsão</b><span>${esc(v.texto || "")}</span>
+  return `<div class="prev"><span>${esc(v.texto || "")}</span>
     ${v.status === "ok" ? `<div class="nums"><span>em 7 dias <b>${brl(v.p7)}</b></span><span>em 30 dias <b>${brl(v.p30)}</b></span><span>faixa provável <b>${brl(v.faixa30[0])} – ${brl(v.faixa30[1])}</b></span></div>` : ""}
     ${v.dica ? `<span class="msg">${esc(v.dica)}</span>` : ""}</div>`;
 }
-function variacao(p) {
+function variacao(p, curto) {
   const d = p.hist?.dias || []; if (d.length < 2) return "";
   const a = d[d.length - 2].v, b = d[d.length - 1].v, x = (b / a - 1) * 100;
-  if (Math.abs(x) < 0.5) return `<span>estável</span>`;
-  return `<span class="var ${x < 0 ? "dn" : "up"}">${x < 0 ? "▼" : "▲"} ${Math.abs(x).toFixed(1).replace(".", ",")}% desde ontem</span>`;
+  if (Math.abs(x) < 0.5) return curto ? "estável" : `<span>estável desde ontem</span>`;
+  const t = `${x < 0 ? "▼" : "▲"} ${Math.abs(x).toFixed(1).replace(".", ",")}%`;
+  return curto ? t : `<span class="var ${x < 0 ? "dn" : "up"}">${t} desde ontem</span>`;
 }
-function render() {
-  $("qtd").textContent = produtos.length ? `${produtos.length} acompanhando` : "";
-  if (!produtos.length) { $("lista").innerHTML = `<p class="vazio">Nenhum produto ainda. Busque acima e toque em <b>Acompanhar</b>: eu atualizo a cada 30 minutos e aviso no celular quando o preço chegar onde você quer.</p>`; return; }
-  $("lista").innerHTML = produtos.map(p => {
-    const u = p.ultimo || {}, m = u.melhor, abre = p.id === aberto, naMeta = p.alvo && m && m.preco <= +p.alvo;
-    return `<article class="prod" id="p-${p.id}">
-      <button type="button" data-abrir="${p.id}" aria-expanded="${abre}">
-        <span class="nome">${esc(p.termo)}</span><span class="pr">${m ? brl(m.preco) : "–"}</span>
-        <span class="sub"><span class="chip">${esc(p.tipo?.nome || "Produto")}</span>${m ? `<span>${esc(m.lojaNome || "")}</span>` : `<span>sem preço lido agora</span>`}${variacao(p)}
-          ${p.alvo ? `<span class="chip ${naMeta ? "ok" : ""}">${naMeta ? "no alvo" : "alvo"} ${brl(+p.alvo)}</span>` : ""}${p.hist?.min ? `<span>menor visto ${brl(p.hist.min)}</span>` : ""}</span>
-      </button>
-      ${abre ? `<div class="det">
-        ${m ? `<div class="linha"><a class="btn mini" href="${esc(m.link)}" target="_blank" rel="noopener">Abrir oferta · ${esc(m.lojaNome || "loja")}</a><span class="msg">${esc(m.titulo)}</span></div>` : ""}
-        ${u.lojas ? cartoesLojas(u) : `<p class="msg">Buscando pela primeira vez…</p>`}
-        <div style="display:grid;gap:6px"><b>Histórico do menor preço</b>${grafico(p.hist)}</div>
-        ${blocoPrevisao(p)}
-        <div class="alvo"><label class="msg" for="alvo-${p.id}">Alerta quando chegar a</label><input id="alvo-${p.id}" inputmode="decimal" value="${p.alvo ? String(+p.alvo).replace(".", ",") : ""}" placeholder="sem alvo"><button class="btn mini sec" data-alvo="${p.id}" type="button">Salvar</button></div>
-        <p class="msg" style="margin:0">Sem alvo, aviso quando aparecer o menor preço já visto. Atualizado ${quando(p.atualizado)}.</p>
-        <div class="linha"><button class="btn mini perigo" data-rem="${p.id}" type="button">Remover produto</button></div>
-      </div>` : ""}
-    </article>`;
+
+// ---------- tela
+function renderAtivos() {
+  $("qtd").textContent = produtos.length ? `${produtos.length} acompanhando · toque para ver` : "";
+  if (!produtos.length) { $("ativos").innerHTML = `<div class="at vazio">Nenhum produto ainda. Busque acima e toque em <b>&nbsp;Acompanhar</b>.</div>`; return; }
+  $("ativos").innerHTML = produtos.map(p => {
+    const m = p.ultimo?.melhor, sel = !busca && p.id === aberto, v = variacao(p, true);
+    const naMeta = p.alvo && m && m.preco <= +p.alvo;
+    return `<button class="at ${sel ? "sel" : ""}" type="button" data-sel="${p.id}" aria-pressed="${sel}">
+      <span class="n">${esc(p.termo)}</span><span class="v">${m ? brl(m.preco) : "–"}</span>
+      <span class="x">${naMeta ? "🎯 no alvo" : m ? esc(m.lojaNome || "") : "sem preço"}${v && !naMeta ? ` · ${v}` : ""}</span></button>`;
   }).join("");
-  document.querySelectorAll("[data-abrir]").forEach(b => b.onclick = () => { aberto = aberto === b.dataset.abrir ? null : b.dataset.abrir; store.set("aberto", aberto); render(); });
-  document.querySelectorAll("[data-alvo]").forEach(b => b.onclick = async () => {
-    const id = b.dataset.alvo, v = parse($("alvo-" + id).value);
-    try { await api({ acao: "alvo", id, alvo: v }); const p = produtos.find(x => x.id === id); p.alvo = v; render(); toast(v ? `Aviso quando chegar a ${brl(v)}.` : "Alvo removido."); } catch (e) { toast(e.message); }
-  });
-  document.querySelectorAll("[data-rem]").forEach(b => b.onclick = async () => {
-    if (b.dataset.ok !== "1") { b.dataset.ok = "1"; b.textContent = "Toque de novo para remover"; setTimeout(() => { b.dataset.ok = ""; b.textContent = "Remover produto"; }, 4000); return; }
-    try { await api({ acao: "remover", id: b.dataset.rem }); produtos = produtos.filter(x => x.id !== b.dataset.rem); salvarCache(); render(); toast("Removido. Alertas dele desligados."); } catch (e) { toast(e.message); }
-  });
+  $("ativos").querySelectorAll("[data-sel]").forEach(b => b.onclick = () => selecionar(b.dataset.sel));
+  $("ativos").querySelector(".sel")?.scrollIntoView({ inline: "nearest", block: "nearest" });
 }
+function renderPainel() {
+  const el = $("painel");
+  // 1) resultado de uma busca nova
+  if (busca) {
+    const fechar = `<button class="fechar" type="button" id="fecharBusca">✕ fechar</button>`;
+    if (busca.carregando) { el.innerHTML = `<div class="card"><div class="cab"><h2>${esc(busca.q)}</h2>${fechar}</div><span class="msg">Procurando nas lojas… leva uns 10 segundos.</span><div class="skel"></div></div>`; }
+    else if (busca.erro) { el.innerHTML = `<div class="card"><div class="cab"><h2>${esc(busca.q)}</h2>${fechar}</div><span class="msg">Não consegui buscar agora (${esc(busca.erro)}). Tente de novo.</span></div>`; }
+    else {
+      const r = busca.r;
+      el.innerHTML = `<div class="card">
+        <div class="cab"><h2>${esc(busca.q)}</h2>${fechar}<div class="linha" style="grid-column:1/-1"><span class="chip ac">${esc(r.tipo.nome)}</span><span class="msg">${r.relevantes} ofertas iguais ao buscado · ${hora(r.quando)}</span></div></div>
+        ${destaque(r)}
+        <div class="alvo" style="background:var(--soft);padding:10px;border-radius:12px"><button class="btn" id="btnAcomp" type="button">＋ Acompanhar</button><label class="msg" for="novoAlvo">alvo (opcional)</label><input id="novoAlvo" inputmode="decimal" placeholder="${r.melhor ? brl(Math.floor(r.melhor.preco * 0.9)).replace("R$", "").trim() : "R$"}"></div>
+        <span class="eyebrow">Preço em cada loja</span>
+        ${listaLojas(r)}
+      </div>`;
+      $("btnAcomp").onclick = async () => {
+        const b = $("btnAcomp"); b.disabled = true; b.textContent = "Salvando…";
+        try {
+          const { id } = await api({ acao: "adicionar", q: busca.q, alvo: parse($("novoAlvo").value), resultado: r });
+          toast("Adicionado. Aviso sempre que o menor preço baixar."); $("q").value = ""; busca = null; aberto = id; store.set("aberto", id);
+          await carregar(false); if (!(await inscrito())) toast("Ligue os alertas no celular (abaixo) para receber os avisos.");
+        } catch (err) { b.disabled = false; b.textContent = "＋ Acompanhar"; toast(err.message); }
+      };
+    }
+    $("fecharBusca").onclick = () => { busca = null; render(); };
+    return;
+  }
+  // 2) produto ativo selecionado
+  const p = produtos.find(x => x.id === aberto) || produtos[0];
+  if (!p) { el.innerHTML = ""; return; }
+  aberto = p.id;
+  const u = p.ultimo || {}, m = u.melhor;
+  el.innerHTML = `<div class="card">
+    <div class="cab"><h2>${esc(p.termo)}</h2><span class="chip">${esc(p.tipo?.nome || "Produto")}</span>
+      <div class="linha msg" style="grid-column:1/-1;gap:10px">${variacao(p)}${p.hist?.min ? `<span>menor já visto ${brl(p.hist.min)}</span>` : ""}<span>atualizado ${quando(p.atualizado)}</span></div></div>
+    ${u.lojas ? destaque(u) : `<p class="msg">Buscando pela primeira vez…</p>`}
+    ${u.lojas ? `<span class="eyebrow">Preço em cada loja</span>${listaLojas(u)}` : ""}
+    <details class="bloco"><summary>Histórico e previsão</summary><div>${grafico(p.hist)}${blocoPrevisao(p)}</div></details>
+    <details class="bloco"><summary>Alerta e opções</summary><div>
+      <p class="msg" style="margin:0">Aviso no celular sempre que o menor preço baixar. Com alvo, aviso também quando chegar nele.</p>
+      <div class="alvo"><label class="msg" for="alvo-${p.id}">Alvo</label><input id="alvo-${p.id}" inputmode="decimal" value="${p.alvo ? String(+p.alvo).replace(".", ",") : ""}" placeholder="sem alvo"><button class="btn mini sec" data-alvo="${p.id}" type="button">Salvar</button></div>
+      <div class="linha"><button class="btn mini perigo" data-rem="${p.id}" type="button">Remover produto</button></div>
+    </div></details>
+  </div>`;
+  el.querySelector("[data-alvo]").onclick = async () => {
+    const v = parse($("alvo-" + p.id).value);
+    try { await api({ acao: "alvo", id: p.id, alvo: v }); p.alvo = v; salvarCache(); render(); toast(v ? `Aviso também quando chegar a ${brl(v)}.` : "Alvo removido."); } catch (e) { toast(e.message); }
+  };
+  const rem = el.querySelector("[data-rem]");
+  rem.onclick = async () => {
+    if (rem.dataset.ok !== "1") { rem.dataset.ok = "1"; rem.textContent = "Toque de novo para remover"; setTimeout(() => { rem.dataset.ok = ""; rem.textContent = "Remover produto"; }, 4000); return; }
+    try { await api({ acao: "remover", id: p.id }); produtos = produtos.filter(x => x.id !== p.id); aberto = produtos[0]?.id ?? null; store.set("aberto", aberto); salvarCache(); render(); toast("Removido. Alertas dele desligados."); } catch (e) { toast(e.message); }
+  };
+}
+function render() { renderAtivos(); renderPainel(); }
 function salvarCache() { store.set("cache", { produtos, agora: ultimaAtualizacao }); }
 function mostrarStatus(txt) { $("status").innerHTML = txt || (ultimaAtualizacao ? `✓ ${hora(ultimaAtualizacao)}<br>próx. ${hora(new Date(Date.parse(ultimaAtualizacao) + 30 * 60e3).toISOString())}` : ""); }
 
@@ -292,8 +363,8 @@ async function carregar(atualizar = true) {
   try {
     const r = await api({ acao: "meus", atualizar });
     produtos = r.produtos; ultimaAtualizacao = r.agora; salvarCache(); render(); mostrarStatus();
-    if (aberto && new URLSearchParams(location.search).get("p")) { document.getElementById("p-" + aberto)?.scrollIntoView({ block: "start", behavior: "smooth" }); history.replaceState(null, "", location.pathname); }
-  } catch (e) { mostrarStatus("sem conexão"); if (!produtos.length) $("lista").innerHTML = `<p class="vazio">Não consegui carregar agora. Toque em atualizar.</p>`; }
+    if (new URLSearchParams(location.search).get("p")) { $("painel").scrollIntoView({ block: "start", behavior: "smooth" }); history.replaceState(null, "", location.pathname); }
+  } catch (e) { mostrarStatus("sem conexão"); if (!produtos.length) $("ativos").innerHTML = `<div class="at vazio">Não consegui carregar agora. Toque em atualizar.</div>`; }
   $("btnAtualizar").classList.remove("gira"); carregando = false;
 }
 $("btnAtualizar").onclick = () => carregar(true);
@@ -314,7 +385,7 @@ async function renderAlertas() {
   if (!suporta) { el.innerHTML = ios && !standalone ? `<p class="msg" style="margin:0">No iPhone, os alertas funcionam com o app na Tela de Início (veja "Instalar no celular" abaixo).</p>` : `<p class="msg" style="margin:0">Este navegador não aceita alertas. No Android, use o Chrome.</p>`; return; }
   const sub = await inscricao().catch(() => null);
   if (!sub) {
-    el.innerHTML = `<p class="msg" style="margin:0">Receba aviso quando um produto chegar no preço que você quer, ou bater o menor preço já visto. Chega mesmo com o app fechado.</p><div class="linha"><button class="btn" id="aLigar" type="button">🔔 Ligar alertas</button></div>`;
+    el.innerHTML = `<p class="msg" style="margin:0">Receba aviso sempre que o menor preço de um produto ativo baixar, e quando chegar no seu alvo. Chega mesmo com o app fechado.</p><div class="linha"><button class="btn" id="aLigar" type="button">🔔 Ligar alertas</button></div>`;
     $("aLigar").onclick = async () => {
       try {
         if (await Notification.requestPermission() !== "granted") return toast("Permissão negada. Libere as notificações nas configurações do celular.");
@@ -327,7 +398,7 @@ async function renderAlertas() {
     return;
   }
   api({ acao: "inscrever", sub: sub.toJSON() }).catch(() => {});
-  el.innerHTML = `<p class="msg" style="margin:0">Alertas ligados neste aparelho. Confiro os preços a cada 30 minutos.</p>
+  el.innerHTML = `<p class="msg" style="margin:0">✅ Alertas ligados neste aparelho. Confiro os preços a cada 30 minutos e aviso sempre que o menor preço baixar.</p>
     <div class="linha"><button class="btn sec mini" id="aTeste" type="button">Enviar teste</button><button class="btn sec mini" id="aCod" type="button">Copiar código completo</button><button class="btn sec mini" id="aDesl" type="button">Desligar alertas</button></div>`;
   $("aTeste").onclick = async () => { try { const r = await api({ acao: "teste" }); toast(r.ok ? "Teste enviado." : "Não chegou: tente desligar e ligar de novo."); } catch (e) { toast(e.message); } };
   $("aCod").onclick = async () => { try { await navigator.clipboard.writeText(dono); toast("Código copiado."); } catch (e) { prompt("Seu código:", dono); } };
