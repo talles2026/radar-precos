@@ -177,7 +177,7 @@ footer button{all:unset;color:var(--accent);cursor:pointer;font-weight:600}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
-const VERSAO = "5";
+const VERSAO = "6";
 const FN = "https://xgwdrrxbqopsfhjgkvdq.supabase.co/functions/v1/precos";
 const $ = id => document.getElementById(id);
 const store = { get(k, d) { try { const v = localStorage.getItem("rp:" + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -212,6 +212,9 @@ async function api(corpo, ms = 100000) {
 }
 
 // ---------- preços por loja: todas as lojas obrigatórias, do menor para o maior
+// veículo: ano e km do anúncio, e o que o anúncio não diz (cabine/tração) para conferir antes de ir ver
+const extraVeic = m => !m ? "" : [m.ano ? String(m.ano) : "", m.km ? m.km + " km" : "", m.confirmar?.length ? "confira " + m.confirmar.join(" e ") : ""].filter(Boolean).join(" · ");
+const chipsFiltro = r => r?.filtro?.partes?.length ? `<div class="linha" style="grid-column:1/-1;gap:6px">${r.filtro.partes.map(t => `<span class="chip">${esc(t)}</span>`).join("")}</div>` : "";
 function listaLojas(r) {
   const melhor = r.melhor;
   const lojas = [...(r.lojas || [])].sort((a, b) => (a.melhor ? a.melhor.preco : Infinity) - (b.melhor ? b.melhor.preco : Infinity));
@@ -219,7 +222,7 @@ function listaLojas(r) {
     const m = l.melhor, best = melhor && m && m.link === melhor.link;
     return `<li class="${best ? "best" : ""}">
       <span class="lj-n">${esc(l.nome)}${best ? `<span class="chip ac">menor</span>` : ""}${m?.suspeito ? `<span class="chip wa">confira</span>` : ""}</span>
-      ${m ? `<span class="lj-v">${brl(m.preco)}</span><span class="lj-s">${esc(m.titulo)}${m.via ? ` · via ${esc(m.via)}` : ""}</span>
+      ${m ? `<span class="lj-v">${brl(m.preco)}</span><span class="lj-s">${esc(m.titulo)}${extraVeic(m) ? ` · ${esc(extraVeic(m))}` : ""}${m.via ? ` · via ${esc(m.via)}` : ""}</span>
         <span class="lj-a"><a href="${esc(m.link)}" target="_blank" rel="noopener">Abrir oferta →</a><a class="sec" href="${esc(l.link)}" target="_blank" rel="noopener">mais na loja</a></span>`
         : `<span class="lj-v nada">sem preço lido</span>${l.motivo ? `<span class="lj-s">${esc(l.motivo)}</span>` : ""}
         <span class="lj-a"><a href="${esc(l.link)}" target="_blank" rel="noopener">Ver na loja, do menor preço →</a></span>`}
@@ -235,7 +238,7 @@ function destaque(r) {
   const m = r.melhor;
   if (!m) return `<p style="margin:0"><b>Não achei preço igual ao buscado nas lojas que deixam ler.</b> <span class="msg">Use os atalhos abaixo; cada um já abre a busca ordenada pelo menor preço.</span></p>`;
   return `<div style="display:grid;gap:4px"><span class="eyebrow">Menor preço agora</span><div class="big">${brl(m.preco)}</div>
-    <div class="msg">${esc(m.lojaNome || "")}</div>
+    <div class="msg">${esc(m.lojaNome || "")}${extraVeic(m) ? ` · ${esc(extraVeic(m))}` : ""}</div>
     ${m.suspeito ? `<div class="chip wa" style="justify-self:start">Bem abaixo dos outros anúncios: confira estado, vendedor e se não é golpe</div>` : ""}
     <div style="margin-top:4px"><a class="btn" href="${esc(m.link)}" target="_blank" rel="noopener">Abrir oferta · ${esc(m.lojaNome || "loja")}</a></div></div>`;
 }
@@ -311,7 +314,7 @@ function renderPainel() {
     else {
       const r = busca.r;
       el.innerHTML = `<div class="card">
-        <div class="cab"><h2>${esc(busca.q)}</h2>${fechar}<div class="linha" style="grid-column:1/-1"><span class="chip ac">${esc(r.tipo.nome)}</span><span class="msg">${r.relevantes} ofertas iguais ao buscado · ${hora(r.quando)}</span></div></div>
+        <div class="cab"><h2>${esc(busca.q)}</h2>${fechar}<div class="linha" style="grid-column:1/-1"><span class="chip ac">${esc(r.tipo.nome)}</span><span class="msg">${r.relevantes} ofertas iguais ao buscado · ${hora(r.quando)}</span></div>${chipsFiltro(r)}</div>
         ${destaque(r)}
         <div class="alvo" style="background:var(--soft);padding:10px;border-radius:12px"><button class="btn" id="btnAcomp" type="button">＋ Acompanhar</button><label class="msg" for="novoAlvo">alvo (opcional)</label><input id="novoAlvo" inputmode="decimal" placeholder="${r.melhor ? brl(Math.floor(r.melhor.preco * 0.9)).replace("R$", "").trim() : "R$"}"></div>
         <span class="eyebrow">Preço em cada loja</span>
@@ -336,7 +339,7 @@ function renderPainel() {
   const u = p.ultimo || {}, m = u.melhor;
   el.innerHTML = `<div class="card">
     <div class="cab"><h2>${esc(p.termo)}</h2><span class="chip">${esc(p.tipo?.nome || "Produto")}</span>
-      <div class="linha msg" style="grid-column:1/-1;gap:10px">${variacao(p)}${p.hist?.min ? `<span>menor já visto ${brl(p.hist.min)}</span>` : ""}<span>atualizado ${quando(p.atualizado)}</span></div></div>
+      <div class="linha msg" style="grid-column:1/-1;gap:10px">${variacao(p)}${p.hist?.min ? `<span>menor já visto ${brl(p.hist.min)}</span>` : ""}<span>atualizado ${quando(p.atualizado)}</span></div>${chipsFiltro(u)}</div>
     ${u.lojas ? destaque(u) : `<p class="msg">Buscando pela primeira vez…</p>`}
     ${u.lojas ? `<span class="eyebrow">Preço em cada loja</span>${listaLojas(u)}` : ""}
     <details class="bloco"><summary>Histórico e previsão</summary><div>${grafico(p.hist)}${blocoPrevisao(p)}</div></details>

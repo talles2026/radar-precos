@@ -53,6 +53,50 @@ export function detectarTipo(q) {
   return { id: "outros", nome: "Produto" };
 }
 
+// ---------------------------------------------------------------- filtros de veículo
+// Entende no texto da busca: faixa de ano ("2002 a 2005", "2002-2005", "2003"), cabine e tração.
+// O que é filtro sai do texto; o resto ("hilux") é o que vai para as lojas.
+const ANO = "(19[5-9]\\d|20[0-3]\\d)";
+const CAB_SIMPLES = /\b(cabine simples|cab\.? ?simples|cabine unica|cab\.? ?unica|cs|c\/s)\b/;
+const CAB_DUPLA = /\b(cabine dupla|cab\.? ?dupla|cabine estendida|cd|c\/d)\b/;
+export function filtrosVeiculo(q) {
+  let n = " " + norm(q) + " ";
+  const f = {};
+  const faixa = n.match(new RegExp(` (?:de |do |ano |anos )?${ANO} ?(?:a|ate|ao|-|/) ?${ANO} `));
+  if (faixa) { const a = +faixa[1], b = +faixa[2]; f.anoDe = Math.min(a, b); f.anoAte = Math.max(a, b); n = n.replace(faixa[0], " "); }
+  else { const um = n.match(new RegExp(` (?:ano )?${ANO} `)); if (um) { f.anoDe = f.anoAte = +um[1]; n = n.replace(um[0], " "); } }
+  if (CAB_SIMPLES.test(n)) { f.cabine = "simples"; n = n.replace(new RegExp(CAB_SIMPLES.source, "g"), " "); }
+  else if (CAB_DUPLA.test(n)) { f.cabine = "dupla"; n = n.replace(new RegExp(CAB_DUPLA.source, "g"), " "); }
+  if (/\b(4x4|4wd|tracao 4x4|tracao integral)\b/.test(n)) { f.tracao = "4x4"; n = n.replace(/\b(tracao )?(4x4|4wd|integral)\b/g, " "); }
+  else if (/\b4x2\b/.test(n)) { f.tracao = "4x2"; n = n.replace(/\b4x2\b/g, " "); }
+  const base = n.replace(/\b(ano|anos)\b/g, " ").replace(/\s+/g, " ").trim();
+  const partes = [];
+  if (f.anoDe) partes.push(f.anoDe === f.anoAte ? `Ano ${f.anoDe}` : `Ano ${f.anoDe} a ${f.anoAte}`);
+  if (f.cabine) partes.push(`Cabine ${f.cabine}`);
+  if (f.tracao) partes.push(f.tracao);
+  return { ...f, base: base || norm(q), partes, ativo: partes.length > 0 };
+}
+// confere um anúncio com os filtros. Ano: precisa estar na faixa (do anúncio ou do título).
+// Cabine e tração: só recusa quando o anúncio diz o contrário; se não disser, passa com aviso.
+export function passaFiltro(it, f) {
+  const t = " " + norm(it.titulo + " " + (it.detalhes || "")) + " ";
+  const tt = " " + norm(it.titulo) + " ";   // cabine e tração: só o título (os detalhes trazem estado, "CD player" etc.)
+  if (f.anoDe) {
+    const anos = [...t.matchAll(/(?:^|[^0-9])(19[5-9]\d|20[0-3]\d)(?=[^0-9]|$)/g)].map((m) => +m[1]);
+    if (it.ano) anos.unshift(it.ano);
+    if (!anos.length || !anos.some((a) => a >= f.anoDe && a <= f.anoAte)) return false;
+  }
+  if (f.cabine === "simples" && CAB_DUPLA.test(tt)) return false;
+  if (f.cabine === "dupla" && CAB_SIMPLES.test(tt)) return false;
+  if (f.tracao === "4x4" && /\b4x2\b/.test(tt)) return false;
+  if (f.tracao === "4x2" && /\b(4x4|4wd)\b/.test(tt)) return false;
+  const falta = [];
+  if (f.cabine && !(f.cabine === "simples" ? CAB_SIMPLES : CAB_DUPLA).test(t)) falta.push("cabine");
+  if (f.tracao && !new RegExp(`\\b${f.tracao}\\b`).test(t)) falta.push("tração");
+  it.confirmar = falta.length ? falta : undefined;
+  return true;
+}
+
 // ---------------------------------------------------------------- lojas
 export const LOJAS = {
   ml: { nome: "Mercado Livre" }, shopee: { nome: "Shopee" }, amazon: { nome: "Amazon" }, ali: { nome: "AliExpress" },
@@ -62,15 +106,20 @@ export function lojasDoTipo(tipo) { return tipo.id === "veiculo" ? ["olx", "ml",
 
 const slug = (q) => norm(q).replace(/[.,/]/g, " ").trim().replace(/\s+/g, "-");
 export function linkBusca(loja, q, tipo) {
-  const e = encodeURIComponent(q), veic = tipo.id === "veiculo";
+  const veic = tipo.id === "veiculo", f = veic ? filtrosVeiculo(q) : null;
+  // veículo com filtros: a loja recebe só o modelo (+ cabine/tração no texto), e o ano vai como faixa quando a loja aceita
+  const extra = f?.ativo ? [f.cabine ? `cabine ${f.cabine}` : "", f.tracao || ""].filter(Boolean).join(" ") : "";
+  const qv = f?.ativo ? `${f.base} ${extra}`.trim() : q;
+  const e = encodeURIComponent(q), ev = encodeURIComponent(qv);
+  const anos = f?.anoDe ? (f.anoDe === f.anoAte ? ` ${f.anoDe}` : ` ${f.anoDe}..${f.anoAte}`) : "";
   switch (loja) {
-    case "ml": return veic ? `https://lista.mercadolivre.com.br/veiculos/${slug(q)}_OrderId_PRICE` : `https://lista.mercadolivre.com.br/${slug(q)}_OrderId_PRICE_NoIndex_True`;
+    case "ml": return veic ? `https://lista.mercadolivre.com.br/veiculos/${slug(qv)}_OrderId_PRICE` : `https://lista.mercadolivre.com.br/${slug(q)}_OrderId_PRICE_NoIndex_True`;
     case "shopee": return `https://shopee.com.br/search?keyword=${e}&order=asc&sortBy=price`;
     case "amazon": return `https://www.amazon.com.br/s?k=${e}&s=price-asc-rank`;
     case "ali": return `https://pt.aliexpress.com/w/wholesale-${slug(q)}.html?SortType=price_asc`;
-    case "google": return veic ? `https://www.google.com/search?q=${e}+%C3%A0+venda&hl=pt-BR&gl=br` : `https://www.google.com/search?q=${e}&udm=28&tbs=mr:1,p_ord:p&hl=pt-BR&gl=br`;
-    case "olx": return veic ? `https://www.olx.com.br/autos-e-pecas/${tipo.moto ? "motos" : "carros-vans-e-utilitarios"}?q=${e}&sp=1` : `https://www.olx.com.br/brasil?q=${e}&sp=1`;
-    case "fb": return `https://www.facebook.com/marketplace/category/search?query=${e}&sortBy=price_ascend`;
+    case "google": return veic ? `https://www.google.com/search?q=${encodeURIComponent(qv + anos)}+%C3%A0+venda&hl=pt-BR&gl=br` : `https://www.google.com/search?q=${e}&udm=28&tbs=mr:1,p_ord:p&hl=pt-BR&gl=br`;
+    case "olx": return veic ? `https://www.olx.com.br/autos-e-pecas/${tipo.moto ? "motos" : "carros-vans-e-utilitarios"}?q=${encodeURIComponent(f?.ativo ? f.base : q)}&sp=1` : `https://www.olx.com.br/brasil?q=${e}&sp=1`;
+    case "fb": return veic && f?.anoDe ? `https://www.facebook.com/marketplace/category/vehicles?query=${encodeURIComponent(f.base)}&minYear=${f.anoDe}&maxYear=${f.anoAte}&sortBy=price_ascend` : `https://www.facebook.com/marketplace/category/search?query=${veic ? ev : e}&sortBy=price_ascend`;
   }
   return "";
 }
@@ -154,7 +203,11 @@ function lerOlx(md) {
     const pr = seg.match(/\n### (R\$ ?[\d.,]+)/)?.[1] ?? seg.match(/\n(R\$ ?[\d.,]+)\n/)?.[1];
     const local = seg.match(/sem juros\n\n([^\n]+)\n/)?.[1] ?? "";
     const preco = valor(pr);
-    if (tit && preco && /olx\.com\.br/.test(link)) out.push({ loja: "olx", titulo: ent(tit), preco, link, vendedor: local ? `OLX · ${local}` : "OLX" });
+    // detalhes do cartão (ano, km, câmbio) ficam nas linhas depois do título, sem o preço
+    const detalhes = ent(seg.slice(seg.indexOf(")") + 1).replace(/R\$ ?[\d.,]+/g, " ").replace(/\]\([^)]*\)/g, " ")).slice(0, 400);
+    const ano = +(detalhes.match(/(?:^|[^0-9])(19[5-9]\d|20[0-3]\d)(?![0-9])/)?.[1] ?? 0) || null;
+    const km = detalhes.match(/([\d.]+) ?km\b/i)?.[1] ?? null;
+    if (tit && preco && /olx\.com\.br/.test(link)) out.push({ loja: "olx", titulo: ent(tit), preco, link, vendedor: local ? `OLX · ${local}` : "OLX", detalhes, ano, km });
   }
   return out;
 }
@@ -194,19 +247,32 @@ function semAberracao(itens, tipo) {
 export async function buscar(q, tipoForcado, debug = false) {
   const tipo = tipoForcado ?? detectarTipo(q);
   const e = encodeURIComponent(q), veic = tipo.id === "veiculo";
-  const tarefas = veic
-    ? { olx: () => pegar(`https://r.jina.ai/${linkBusca("olx", q, tipo)}`, { Accept: "text/plain", "X-Return-Format": "markdown" }, 25000).then(lerOlx) }
-    : {
+  const filtro = veic ? filtrosVeiculo(q) : null, qRel = filtro?.ativo ? filtro.base : q;
+  const lerOlxUrl = (url) => pegar(`https://r.jina.ai/${url}`, { Accept: "text/plain", "X-Return-Format": "markdown" }, 25000).then(lerOlx);
+  const olxBase = (txt) => `https://www.olx.com.br/autos-e-pecas/${tipo.moto ? "motos" : "carros-vans-e-utilitarios"}?q=${encodeURIComponent(txt)}&sp=1`;
+  const tarefas = {};
+  if (veic) {
+    tarefas.olx = () => lerOlxUrl(olxBase(qRel));
+    // com faixa de ano, procura também cada ano (até 4): o menor preço do modelo costuma ser de carro mais velho
+    if (filtro?.anoDe) {
+      const anos = []; for (let a = filtro.anoDe; a <= filtro.anoAte; a++) anos.push(a);
+      const passo = Math.max(1, Math.ceil(anos.length / 4));
+      anos.filter((_, i) => i % passo === 0).slice(0, 4).forEach((a) => { tarefas["olx" + a] = () => lerOlxUrl(olxBase(`${qRel} ${a}`)); });
+    }
+  }
+  Object.assign(tarefas, veic ? {} : {
       amazon: () => pegar(`https://www.amazon.com.br/s?k=${e}`).then(lerAmazon),
       ali: () => pegar(`https://pt.aliexpress.com/w/wholesale-${slug(q)}.html`).then(lerAli),
       bing: () => pegar(`https://www.bing.com/shop?q=${e}&setmkt=pt-BR&cc=BR`).then(lerBing),
       buscape: () => pegar(`https://www.buscape.com.br/search?q=${e}`).then(lerBuscape),
-    };
+    });
   const brutos = [], falhas = {};
   await Promise.all(Object.entries(tarefas).map(async ([k, f]) => {
     try { brutos.push(...(await f())); } catch (err) { falhas[k] = String(err?.message ?? err).slice(0, 80); }
   }));
-  const bons = semAberracao(brutos.filter((x) => x.preco >= 1 && relevante(x, q, tipo)), tipo).sort((a, b) => a.preco - b.preco);
+  // o mesmo anúncio pode vir em mais de uma busca
+  const vistos = new Set(), unicos = brutos.filter((x) => { const k = x.link || x.titulo + x.preco; if (vistos.has(k)) return false; vistos.add(k); return true; });
+  const bons = semAberracao(unicos.filter((x) => x.preco >= 1 && relevante(x, qRel, tipo) && (!filtro?.ativo || passaFiltro(x, filtro))), tipo).sort((a, b) => a.preco - b.preco);
   // muito abaixo do normal: avisa (em veículo, preço assim costuma ser golpe ou problema)
   if (bons.length >= 4) {
     const med = bons[bons.length >> 1].preco;
@@ -219,13 +285,14 @@ export async function buscar(q, tipoForcado, debug = false) {
       : id === "fb" ? "O Facebook só mostra anúncios com login."
       : id === "shopee" ? "A Shopee bloqueia leitura automática; aparece aqui quando um comparador traz oferta dela."
       : id === "ml" ? (veic ? "O Mercado Livre bloqueia leitura automática de veículos." : "Nenhuma oferta do Mercado Livre nos comparadores agora.")
-      : falhas[id] ? "A loja não respondeu agora; tento de novo na próxima atualização." : "Nenhum anúncio igual ao buscado.";
+      : Object.keys(falhas).some((k) => k.startsWith(id)) && !itens.length ? "A loja não respondeu agora; tento de novo na próxima atualização."
+      : filtro?.ativo ? `Nenhum anúncio com ${filtro.partes.join(", ").toLowerCase()} agora.` : "Nenhum anúncio igual ao buscado.";
     return { id, nome: LOJAS[id].nome, link: linkBusca(id, q, tipo), melhor: itens[0] ?? null, mais: itens.slice(1, 3), qtd: itens.length, motivo: itens.length ? null : motivo };
   });
   const daLista = bons.filter((x) => ids.includes(x.loja));
   const outras = bons.filter((x) => !x.loja).slice(0, 3);
   return {
-    q, tipo, quando: new Date().toISOString(),
+    q, tipo, quando: new Date().toISOString(), filtro: filtro?.ativo ? { partes: filtro.partes, base: filtro.base } : null,
     melhor: daLista[0] ?? null, lojas, outras,
     lidas: brutos.length, relevantes: bons.length, falhas,
     ...(debug ? { amostra: brutos.slice(0, 60).map((x) => [x.loja, x.preco, x.titulo.slice(0, 80), relevante(x, q, tipo)]) } : {}),
