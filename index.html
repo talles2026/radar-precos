@@ -102,6 +102,14 @@ form.busca input:focus{outline:none;border-color:var(--accent)}
 .at .n{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .at .v{font:700 16px var(--f-num);color:var(--accent)}
 .at .x{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.at{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:pan-x;transition:transform .15s}
+.at.segurando{transform:scale(.95);border-color:var(--accent)}
+.folha{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center}
+.folha[hidden]{display:none}
+.folha>div{width:min(520px,100%);background:var(--panel);border-radius:18px 18px 0 0;padding:18px 16px calc(16px + env(safe-area-inset-bottom));display:grid;gap:10px}
+.folha .t{font-weight:700;font-size:15px;overflow-wrap:anywhere}
+.folha button{all:unset;box-sizing:border-box;text-align:center;padding:14px;border-radius:12px;font-weight:700;font-size:15px;cursor:pointer;border:1px solid var(--line)}
+.folha .excluir{background:#d64545;color:#fff;border-color:#d64545}
 .at.vazio{width:auto;color:var(--muted);font-size:13px;border-style:dashed;cursor:default}
 .secao{display:grid;gap:10px}
 .secao-t{display:flex;align-items:baseline;gap:8px}
@@ -175,9 +183,14 @@ footer button{all:unset;color:var(--accent);cursor:pointer;font-weight:600}
   </footer>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="folha" id="folha" hidden><div role="dialog" aria-modal="true" aria-labelledby="folhaT">
+  <div class="t" id="folhaT"></div>
+  <button type="button" class="excluir" id="folhaExcluir">🗑️ Excluir</button>
+  <button type="button" id="folhaCancelar">Cancelar</button>
+</div></div>
 
 <script>
-const VERSAO = "6";
+const VERSAO = "7";
 const FN = "https://xgwdrrxbqopsfhjgkvdq.supabase.co/functions/v1/precos";
 const $ = id => document.getElementById(id);
 const store = { get(k, d) { try { const v = localStorage.getItem("rp:" + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -292,7 +305,7 @@ function variacao(p, curto) {
 
 // ---------- tela
 function renderAtivos() {
-  $("qtd").textContent = produtos.length ? `${produtos.length} acompanhando · toque para ver` : "";
+  $("qtd").textContent = produtos.length ? `${produtos.length} acompanhando · segure para excluir` : "";
   if (!produtos.length) { $("ativos").innerHTML = `<div class="at vazio">Nenhum produto ainda. Busque acima e toque em <b>&nbsp;Acompanhar</b>.</div>`; return; }
   $("ativos").innerHTML = produtos.map(p => {
     const m = p.ultimo?.melhor, sel = !busca && p.id === aberto, v = variacao(p, true);
@@ -301,7 +314,16 @@ function renderAtivos() {
       <span class="n">${esc(p.termo)}</span><span class="v">${m ? brl(m.preco) : "–"}</span>
       <span class="x">${naMeta ? "🎯 no alvo" : m ? esc(m.lojaNome || "") : "sem preço"}${v && !naMeta ? ` · ${v}` : ""}</span></button>`;
   }).join("");
-  $("ativos").querySelectorAll("[data-sel]").forEach(b => b.onclick = () => selecionar(b.dataset.sel));
+  $("ativos").querySelectorAll("[data-sel]").forEach(b => {
+    let t = null, longo = false, x0 = 0, y0 = 0;
+    const parar = () => { clearTimeout(t); t = null; b.classList.remove("segurando"); };
+    b.addEventListener("pointerdown", e => { longo = false; x0 = e.clientX; y0 = e.clientY; b.classList.add("segurando");
+      t = setTimeout(() => { longo = true; b.classList.remove("segurando"); navigator.vibrate?.(30); abrirFolha(b.dataset.sel); }, 550); });
+    b.addEventListener("pointermove", e => { if (t && Math.hypot(e.clientX - x0, e.clientY - y0) > 10) parar(); });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(ev => b.addEventListener(ev, parar));
+    b.addEventListener("contextmenu", e => { e.preventDefault(); if (!longo) { parar(); longo = true; abrirFolha(b.dataset.sel); } });
+    b.onclick = e => { if (longo) { e.preventDefault(); longo = false; return; } selecionar(b.dataset.sel); };
+  });
   $("ativos").querySelector(".sel")?.scrollIntoView({ inline: "nearest", block: "nearest" });
 }
 function renderPainel() {
@@ -356,9 +378,20 @@ function renderPainel() {
   const rem = el.querySelector("[data-rem]");
   rem.onclick = async () => {
     if (rem.dataset.ok !== "1") { rem.dataset.ok = "1"; rem.textContent = "Toque de novo para remover"; setTimeout(() => { rem.dataset.ok = ""; rem.textContent = "Remover produto"; }, 4000); return; }
-    try { await api({ acao: "remover", id: p.id }); produtos = produtos.filter(x => x.id !== p.id); aberto = produtos[0]?.id ?? null; store.set("aberto", aberto); salvarCache(); render(); toast("Removido. Alertas dele desligados."); } catch (e) { toast(e.message); }
+    await removerProduto(p.id);
   };
 }
+async function removerProduto(id) {
+  try { await api({ acao: "remover", id }); produtos = produtos.filter(x => x.id !== id); if (aberto === id) { aberto = produtos[0]?.id ?? null; store.set("aberto", aberto); } salvarCache(); render(); toast("Excluído. Alertas dele desligados."); } catch (e) { toast(e.message); }
+}
+// segurar o produto ativo: abre a opção de excluir
+let folhaId = null;
+function abrirFolha(id) { const p = produtos.find(x => x.id === id); if (!p) return; folhaId = id; $("folhaT").textContent = p.termo; $("folha").hidden = false; $("folhaCancelar").focus(); }
+function fecharFolha() { $("folha").hidden = true; folhaId = null; }
+$("folha").onclick = e => { if (e.target === $("folha")) fecharFolha(); };
+$("folhaCancelar").onclick = fecharFolha;
+$("folhaExcluir").onclick = async () => { const id = folhaId; fecharFolha(); if (id) await removerProduto(id); };
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("folha").hidden) fecharFolha(); });
 function render() { renderAtivos(); renderPainel(); }
 function salvarCache() { store.set("cache", { produtos, agora: ultimaAtualizacao }); }
 function mostrarStatus(txt) { $("status").innerHTML = txt || (ultimaAtualizacao ? `✓ ${hora(ultimaAtualizacao)}<br>próx. ${hora(new Date(Date.parse(ultimaAtualizacao) + 30 * 60e3).toISOString())}` : ""); }
